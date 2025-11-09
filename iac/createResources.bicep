@@ -265,7 +265,7 @@ resource kv 'Microsoft.KeyVault/vaults@2022-07-01' = {
       tags: resourceTags
       properties: {
         contentType: 'endpoint url (fqdn) of the (internal) carts api'
-        value: deployPrivateEndpoints ? cartsinternalapiaca.properties.configuration.ingress.fqdn : ''
+        value: cartsinternalapiaca.properties.configuration.ingress.fqdn
       }
     }
 
@@ -316,7 +316,7 @@ resource kv 'Microsoft.KeyVault/vaults@2022-07-01' = {
       tags: resourceTags
       properties: {
         contentType: 'subnet id of the aca subnet'
-        value: deployPrivateEndpoints ? vnet.properties.subnets[0].id : ''
+        value: vnet.properties.subnets[0].id
       }
     }
 
@@ -776,10 +776,11 @@ resource uistgacc_mi 'Microsoft.ManagedIdentity/userAssignedIdentities@2022-01-3
   tags: resourceTags
 }
 
-resource uistgacc_roledefinition 'Microsoft.Authorization/roleDefinitions@2022-04-01' existing = {
+// Shared role definition for Storage Account Contributor role
+// This is the Storage Account Contributor role, which is the minimum role permission we can give. 
+// See https://docs.microsoft.com/en-us/azure/role-based-access-control/built-in-roles#:~:text=17d1049b-9a84-46fb-8f53-869881c3d3ab
+resource storageAccountContributorRoleDefinition 'Microsoft.Authorization/roleDefinitions@2022-04-01' existing = {
   scope: subscription()
-  // This is the Storage Account Contributor role, which is the minimum role permission we can give. 
-  // See https://docs.microsoft.com/en-us/azure/role-based-access-control/built-in-roles#:~:text=17d1049b-9a84-46fb-8f53-869881c3d3ab
   name: '17d1049b-9a84-46fb-8f53-869881c3d3ab'
 }
 
@@ -787,9 +788,9 @@ resource uistgacc_roledefinition 'Microsoft.Authorization/roleDefinitions@2022-0
 // Details: https://learn.microsoft.com/en-us/answers/questions/287573/authorization-failed-when-when-writing-a-roleassig.html
 resource roleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   scope: uistgacc
-  name: guid(resourceGroup().id, uistgacc_mi.id, uistgacc_roledefinition.id)
+  name: guid(resourceGroup().id, uistgacc_mi.id, storageAccountContributorRoleDefinition.id)
   properties: {
-    roleDefinitionId: uistgacc_roledefinition.id
+    roleDefinitionId: storageAccountContributorRoleDefinition.id
     principalId: uistgacc_mi.properties.principalId
     principalType: 'ServicePrincipal'
   }
@@ -810,7 +811,7 @@ resource deploymentScript 'Microsoft.Resources/deploymentScripts@2020-10-01' = {
     roleAssignment
   ]
   properties: {
-    azPowerShellVersion: '3.0'
+    azPowerShellVersion: '11.0'
     scriptContent: loadTextContent('./scripts/enable-static-website.ps1')
     retentionInterval: 'PT4H'
     environmentVariables: [
@@ -851,20 +852,13 @@ resource ui2stgacc_mi 'Microsoft.ManagedIdentity/userAssignedIdentities@2022-01-
   tags: resourceTags
 }
 
-resource ui2stgacc_roledefinition 'Microsoft.Authorization/roleDefinitions@2022-04-01' existing = {
-  scope: subscription()
-  // This is the Storage Account Contributor role, which is the minimum role permission we can give. 
-  // See https://docs.microsoft.com/en-us/azure/role-based-access-control/built-in-roles#:~:text=17d1049b-9a84-46fb-8f53-869881c3d3ab
-  name: '17d1049b-9a84-46fb-8f53-869881c3d3ab'
-}
-
 // This requires the service principal to be in 'owner' role or a custom role with 'Microsoft.Authorization/roleAssignments/write' permissions.
 // Details: https://learn.microsoft.com/en-us/answers/questions/287573/authorization-failed-when-when-writing-a-roleassig.html
 resource roleAssignment2 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   scope: ui2stgacc
-  name: guid(resourceGroup().id, ui2stgacc_mi.id, ui2stgacc_roledefinition.id)
+  name: guid(resourceGroup().id, ui2stgacc_mi.id, storageAccountContributorRoleDefinition.id)
   properties: {
-    roleDefinitionId: ui2stgacc_roledefinition.id
+    roleDefinitionId: storageAccountContributorRoleDefinition.id
     principalId: ui2stgacc_mi.properties.principalId
     principalType: 'ServicePrincipal'
   }
@@ -882,10 +876,10 @@ resource deploymentScript2 'Microsoft.Resources/deploymentScripts@2020-10-01' = 
   }
   dependsOn: [
     // we need to ensure we wait for the role assignment to be deployed before trying to access the storage account
-    roleAssignment
+    roleAssignment2
   ]
   properties: {
-    azPowerShellVersion: '3.0'
+    azPowerShellVersion: '11.0'
     scriptContent: loadTextContent('./scripts/enable-static-website.ps1')
     retentionInterval: 'PT4H'
     environmentVariables: [
@@ -1431,16 +1425,16 @@ resource jumpboxnic 'Microsoft.Network/networkInterfaces@2022-07-01' =
             primary: true
             privateIPAllocationMethod: 'Dynamic'
             subnet: {
-              id: deployPrivateEndpoints ? vnet.properties.subnets[1].id : ''
+              id: vnet.properties.subnets[1].id
             }
             publicIPAddress: {
-              id: deployPrivateEndpoints ? jumpboxpublicip.id : ''
+              id: jumpboxpublicip.id
             }
           }
         }
       ]
       networkSecurityGroup: {
-        id: deployPrivateEndpoints ? jumpboxnsg.id : ''
+        id: jumpboxnsg.id
       }
       nicType: 'Standard'
     }
@@ -1496,7 +1490,7 @@ resource jumpboxvmschedule 'Microsoft.DevTestLab/schedules@2018-09-15' =
     location: resourceLocation
     tags: resourceTags
     properties: {
-      targetResourceId: deployPrivateEndpoints ? jumpboxvm.id : ''
+      targetResourceId: jumpboxvm.id
       dailyRecurrence: {
         time: '2100'
       }
@@ -1506,27 +1500,6 @@ resource jumpboxvmschedule 'Microsoft.DevTestLab/schedules@2018-09-15' =
       status: 'Enabled'
       taskType: 'ComputeVmShutdownTask'
       timeZoneId: jumpboxVmShutdownScheduleTimezoneId
-    }
-  }
-
-//
-// private dns zone
-//
-
-module privateDnsZone './createPrivateDnsZone.bicep' =
-  if (deployPrivateEndpoints) {
-    name: 'createPrivateDnsZone'
-    params: {
-      privateDnsZoneName: deployPrivateEndpoints
-        ? join(skip(split(cartsinternalapiaca.properties.configuration.ingress.fqdn, '.'), 2), '.')
-        : ''
-      privateDnsZoneVnetId: deployPrivateEndpoints ? vnet.id : ''
-      privateDnsZoneVnetLinkName: privateDnsZoneVnetLinkName
-      privateDnsZoneARecordName: deployPrivateEndpoints
-        ? join(take(split(cartsinternalapiaca.properties.configuration.ingress.fqdn, '.'), 2), '.')
-        : ''
-      privateDnsZoneARecordIp: deployPrivateEndpoints ? cartsinternalapiacaenv.properties.staticIp : ''
-      resourceTags: resourceTags
     }
   }
 
@@ -1542,7 +1515,7 @@ resource cartsinternalapiacaenv 'Microsoft.App/managedEnvironments@2022-06-01-pr
     properties: {
       zoneRedundant: false
       vnetConfiguration: {
-        infrastructureSubnetId: deployPrivateEndpoints ? vnet.properties.subnets[0].id : ''
+        infrastructureSubnetId: vnet.properties.subnets[0].id
         internal: true
       }
     }
@@ -1629,6 +1602,28 @@ resource cartsinternalapiaca 'Microsoft.App/containerApps@2022-06-01-preview' =
         ]
       }
     }
+  }
+
+//
+// private dns zone
+//
+
+module privateDnsZone './createPrivateDnsZone.bicep' =
+  if (deployPrivateEndpoints) {
+    name: 'createPrivateDnsZone'
+    params: {
+      privateDnsZoneName: join(skip(split(cartsinternalapiaca.properties.configuration.ingress.fqdn, '.'), 2), '.')
+      privateDnsZoneVnetId: vnet.id
+      privateDnsZoneVnetLinkName: privateDnsZoneVnetLinkName
+      privateDnsZoneARecordName: join(take(split(cartsinternalapiaca.properties.configuration.ingress.fqdn, '.'), 2), '.')
+      privateDnsZoneARecordIp: cartsinternalapiacaenv.properties.staticIp
+      resourceTags: resourceTags
+    }
+    dependsOn: [
+      cartsinternalapiaca
+      cartsinternalapiacaenv
+      vnet
+    ]
   }
 
 //
